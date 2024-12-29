@@ -123,11 +123,14 @@ func importStore(
 		return nil, err
 	}
 
-	if len(storeData.Tuples) == 0 {
-		return response, nil
+	if len(storeData.Tuples) != 0 {
+		err = importTuples(fgaClient, storeData.Tuples, maxTuplesPerWrite, maxParallelRequests)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	err = importTuples(fgaClient, storeData.Tuples, maxTuplesPerWrite, maxParallelRequests)
+	err = importAssertions(fgaClient, storeData.Tests, response.Store.Id, response.Model.AuthorizationModelId)
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +184,38 @@ func importTuples(
 		return fmt.Errorf("failed to finish progress bar: %w", err)
 	}
 
+	return nil
+}
+
+func importAssertions(
+	fgaClient client.SdkClient,
+	modelTests []storetest.ModelTest,
+	storeId string,
+	modelId string,
+) error {
+	var assertions []client.ClientAssertion
+
+	for _, modelTest := range modelTests {
+		for _, checkTest := range modelTest.Check {
+			for relation, expectation := range checkTest.Assertions {
+				assertions = append(assertions, client.ClientAssertion{
+					User:        checkTest.User,
+					Relation:    relation,
+					Object:      checkTest.Object,
+					Expectation: expectation,
+				})
+			}
+		}
+	}
+
+	writeOptions := client.ClientWriteAssertionsOptions{
+		AuthorizationModelId: &modelId,
+		StoreId:              &storeId,
+	}
+
+	if _, err := fgaClient.WriteAssertions(context.Background()).Body(assertions).Options(writeOptions).Execute(); err != nil {
+		return fmt.Errorf("failed to import assertions: %w", err)
+	}
 	return nil
 }
 
